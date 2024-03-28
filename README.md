@@ -6,6 +6,7 @@ Repo for configuring hosts for basic AI development, including libraries for dev
     - CPU
         - AMD 5950X
         - AMD 5800X
+        - ARM?
     - GPU
         - NVidia 3090
         - AMD 7900XTX
@@ -27,3 +28,27 @@ Repo for configuring hosts for basic AI development, including libraries for dev
 - OpenAI Gym
 - OpenCV?
 - Others for LLM / Diffusion?
+
+
+## Assumptions about base target environment:
+- Ubuntu 22.04 LTS
+    - ssh keys are in place
+    - sudo is available
+    - apt is available
+    - internet is available
+    - user is in sudoers group
+    - GPU is installed in motherboard
+    - GPU has available drivers
+    - system has booted succesfully WITHOUT proprietary drivers installed
+
+- macOS 14
+    - ssh keys are in place
+    - xcode command line tools are installed
+    - sudo is available
+
+## Assumptions about base source environment (if building over ssh):
+- Bash or ZSH shell environment
+- ssh keys are in place
+- ansible is available
+- internet is available
+- connectivity to target hosts is available
