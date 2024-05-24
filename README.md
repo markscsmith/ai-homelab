@@ -56,3 +56,6 @@ Repo for configuring hosts for basic AI development, including libraries for dev
 
 # TODO:
 "now install build-essentials and the dependencies for the amdgpu pro drivers" causes copilot to create an infinite loop suggesting the same packages over and over. Hm.
+
+
+ansible-playbook -i inventory/hosts setup.yml -K -e "pro_key=<some long key>"

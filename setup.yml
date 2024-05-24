@@ -10,13 +10,27 @@
 - hosts: all
   become: yes
   tasks:
-    - name: Check for and install updates
+    - name: Attach Ubuntu Pro
+      command: sudo pro attach {{ pro_key }}
+      register: pro_attach_result
+      ignore_errors: yes
+      become: true
+      when: pro_key is defined
+
+    - name: Check Ubuntu Pro attachment result
+      debug:
+        msg: "Ubuntu Pro is already attached to the machine."
+      when: "'This machine is already attached' in pro_attach_result.stderr"
+
+    - name: Update package cache
+      apt:
+        update_cache: yes
+
+    - name: Upgrade all packages to the latest version
       apt:
         upgrade: dist
-        update_cache: yes
-        cache_valid_time: 3600
-        autoremove: yes
         autoclean: yes
+        autoremove: yes
 
     - name: Install build-essentials
       apt:
