@@ -1,54 +1,29 @@
 ---
+
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Accept SSH keys
+      local_action: "shell ssh-keyscan -H {{ inventory_hostname }} >> ~/.ssh/known_hosts"
+
+
 - hosts: all
   become: yes
   tasks:
-
-    - name: Add nvtop PPA
-      ansible.builtin.apt_repository:
-        repo: 'ppa:flexiondotorg/nvtop'
-
-    - name: Update and upgrade apt packages
+    - name: Check for and install updates
       apt:
+        upgrade: dist
         update_cache: yes
-        upgrade: 'yes'
+        cache_valid_time: 3600
+        autoremove: yes
+        autoclean: yes
 
-    - name: Download AMDGPU-PRO .deb file
-      get_url:
-        url: "https://repo.radeon.com/amdgpu-install/23.40.2/ubuntu/jammy/amdgpu-install_6.0.60002-1_all.deb"
-        dest: "/tmp/amdgpu-install_6.0.60002-1_all.deb"
-      when: not ansible_facts['file_exists']|default(false)
-
-    - name: Install AMDGPU-PRO .deb package
-      apt:
-        deb: "/tmp/amdgpu-install_6.0.60002-1_all.deb"
-
-    - name: Run amdgpu-install with specific usecase
-      command:
-        cmd: amdgpu-install --accept-eula --usecase=workstation,rocm
-
-    - name: Add current user to render and video groups
-      user:
-        name: "mscs"
-        groups: render,video
-        append: yes
-
-    # - name: Run update-pciids command
-    #   command:
-    #     cmd: update-pciids
-
-
-        
-    - name: Install nvtop
-      apt:
-        name: nvtop
-        state: present
-    
     - name: Install build-essentials
       apt:
         name: build-essential
         state: present
-    
-    - name: Install build-essentials
+
+    - name: Install git
       apt:
         name: git
         state: present
@@ -70,17 +45,157 @@
 
     - name: Python3 venv dependency
       apt:
-        name: python3.10-venv
+        name: python3-venv
         state: present
+
+- hosts: collective
+  become: yes
+  tasks:
+    - name: Get drive information
+      shell: lsblk -bno NAME,SIZE | grep -E '(^sd|^nvme)' | awk '{print $1,$2}'
+      register: drive_info
+
+    - name: Debug drive information
+      debug:
+        var: drive_info.stdout_lines
+
+    - name: Calculate approximate drive sizes
+      set_fact:
+        drive_sizes: "{{ drive_info.stdout_lines | map('split', ' ') | map('last') | map('int') | list }}"
+        drive_names: "{{ drive_info.stdout_lines | map('split', ' ') | map('first') | list }}"
+
+    - name: Debug drive sizes and names
+      debug:
+        msg: "Drive sizes: {{ drive_sizes }}, Drive names: {{ drive_names }}"
+
+    - name: Determine drive for /Volumes/Scratch (approx. 2TB)
+      set_fact:
+        scratch_drive: "{{ item.split()[0] }}"
+      loop: "{{ drive_info.stdout_lines }}"
+      when: "item.split()[1] | int >= 2000000000000 * 0.98 and item.split()[1] | int < 3000000000000"
+
+    - name: Determine drive for /Volumes/Speed (approx. 4TB)
+      set_fact:
+        speed_drive: "{{ item.split()[0] }}"
+      loop: "{{ drive_info.stdout_lines }}"
+      when: "item.split()[1] | int >= 4000000000000 * 0.98 and item.split()[1] | int < 5000000000000"
+
+    - name: Determine drive for /Volumes/Storage (approx. 8TB)
+      set_fact:
+        storage_drive: "{{ item.split()[0] }}"
+      loop: "{{ drive_info.stdout_lines }}"
+      when: "item.split()[1] | int >= 8000000000000 * 0.98 and item.split()[1] | int < 9000000000000"
+
+    - name: Debug drives for mount points
+      debug:
+        msg:
+          - "Scratch drive: {{ scratch_drive if scratch_drive is defined else 'Not found' }}"
+          - "Speed drive: {{ speed_drive if speed_drive is defined else 'Not found' }}"
+          - "Storage drive: {{ storage_drive if storage_drive is defined else 'Not found' }}"
+
+    - name: Check if /Volumes/Scratch drive has a filesystem
+      command: blkid /dev/{{ scratch_drive }}
+      register: scratch_drive_fs_check
+      ignore_errors: true
+      when: scratch_drive is defined
+      become: true
+
+    - name: Format drive for /Volumes/Scratch
+      filesystem:
+        fstype: ext4
+        dev: "/dev/{{ scratch_drive }}"
+      when: scratch_drive_fs_check.rc != 0 and scratch_drive is defined
+      become: true
+
+    - name: Mount /Volumes/Scratch
+      mount:
+        path: "/Volumes/Scratch"
+        src: "/dev/{{ scratch_drive }}"
+        fstype: ext4
+        state: mounted
+      when: scratch_drive is defined
+      become: true
+
+    - name: Add /Volumes/Scratch to /etc/fstab
+      lineinfile:
+        path: /etc/fstab
+        line: "/dev/{{ scratch_drive }} /Volumes/Scratch ext4 defaults 0 0"
+      when: scratch_drive is defined
+      become: true
+
+    - name: Check if /Volumes/Speed drive has a filesystem
+      command: blkid /dev/{{ speed_drive }}
+      register: speed_drive_fs_check
+      ignore_errors: true
+      when: speed_drive is defined
+      become: true
+
+    - name: Format drive for /Volumes/Speed
+      filesystem:
+        fstype: ext4
+        dev: "/dev/{{ speed_drive }}"
+      when: speed_drive_fs_check.rc != 0 and speed_drive is defined
+      become: true
+
+    - name: Mount /Volumes/Speed
+      mount:
+        path: "/Volumes/Speed"
+        src: "/dev/{{ speed_drive }}"
+        fstype: ext4
+        state: mounted
+      when: speed_drive is defined
+      become: true
+
+    - name: Add /Volumes/Speed to /etc/fstab
+      lineinfile:
+        path: /etc/fstab
+        line: "/dev/{{ speed_drive }} /Volumes/Speed ext4 defaults 0 0"
+      when: speed_drive is defined
+      become: true
+
+    - name: Check if /Volumes/Storage drive has a filesystem
+      command: blkid /dev/{{ storage_drive }}
+      register: storage_drive_fs_check
+      ignore_errors: true
+      when: storage_drive is defined
+      become: true
+
+    - name: Format drive for /Volumes/Storage
+      filesystem:
+        fstype: ext4
+        dev: "/dev/{{ storage_drive }}"
+      when: storage_drive_fs_check.rc != 0 and storage_drive is defined
+      become: true
+
+    - name: Mount /Volumes/Storage
+      mount:
+        path: "/Volumes/Storage"
+        src: "/dev/{{ storage_drive }}"
+        fstype: ext4
+        state: mounted
+      when: storage_drive is defined
+      become: true
+
+    - name: Add /Volumes/Storage to /etc/fstab
+      lineinfile:
+        path: /etc/fstab
+        line: "/dev/{{ storage_drive }} /Volumes/Storage ext4 defaults 0 0"
+      when: storage_drive is defined
+      become: true
+
+    - name: Change ownership of /Volumes/*
+      file:
+        path: "/Volumes/"
+        owner: "{{ lookup('env', 'USER') }}"
+        group: "{{ lookup('env', 'USER') }}"
+        recurse: yes
+      become: true
 
     - name: Rocm libraries
       apt:
-        name: rocmlibs
+        name:
+          - rocm-smi
+          - rocm-cmake
+          - rocminfo
         state: present
-
-    # - name: tensorflow dependecy
-    #   apt:
-    #     name: libhsa-runtime64-1
-    #     state: present
-    # - name: Reboot the system
-    #   reboot:
+      when: ansible_facts.gpus|default([]) | selectattr('vendor', 'equalto', 'AMD') | list | length > 0
